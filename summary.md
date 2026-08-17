@@ -180,6 +180,68 @@ This is a very important concept in real FastAPI apps because users on the brows
 
 ---
 
+### Pydantic Schemas - Request and Response Validation
+
+This is the commit where the app started using Pydantic models properly instead of just raw dictionaries.
+
+This is a big step because now the app is not only returning data, it is validating the shape of the data coming in and going out.
+
+What changed:
+- a new `schemas.py` file was added
+- `PostBase`, `PostCreate`, `PostUpdate`, and `PostResponse` were created
+- endpoints started using `response_model=`
+- a `POST /api/posts` route was added to create a new post
+
+The model setup looks like this:
+
+```python
+class PostBase(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1)
+    author: str = Field(min_length=1, max_length=50)
+
+class PostCreate(PostBase):
+    pass
+
+class PostResponse(PostBase):
+    id: int
+    date_posted: str
+```
+
+This matters because Pydantic gives a structured way to define what the API expects and what it returns.
+
+So instead of just trusting the input, FastAPI checks things like:
+- title is a string
+- content cannot be empty
+- author has a max length
+- id exists in the response model
+
+The route for creating a post looks like this:
+
+```python
+@app.post("/api/posts", response_model=PostResponse, status_code=status.HTTP_201_CREATED)
+def create_post(post: PostCreate):
+    new_id = max(p["id"] for p in posts) + 1 if posts else 1
+    new_post = {
+        "id": new_id,
+        "author": post.author,
+        "title": post.title,
+        "content": post.content,
+        "date_posted": "April 23, 2025",
+    }
+    posts.append(new_post)
+    return new_post
+```
+
+This is where the real validation pattern starts to become obvious:
+- `post: PostCreate` validates the incoming request body
+- `response_model=PostResponse` makes sure the response matches the expected format
+- `status_code=201` tells the client that a new resource was created
+
+This is one of the biggest FastAPI features in real apps. You define the schema once, and FastAPI handles a lot of the validation and serialization work for you.
+
+---
+
 ## 3. Core FastAPI concepts learned in this repo
 
 ### A. App creation
@@ -270,7 +332,28 @@ HTML example:
 return templates.TemplateResponse(request, "home.html", {"posts": posts})
 ```
 
-### G. In-memory data model
+### G. Pydantic models and validation
+
+This is the key idea introduced in the latest commit.
+
+The app now has models like `PostCreate` and `PostResponse` in `schemas.py`, and FastAPI uses them to validate incoming data and shape outgoing responses.
+
+Example:
+
+```python
+@app.post("/api/posts", response_model=PostResponse)
+def create_post(post: PostCreate):
+    ...
+```
+
+So the flow is basically:
+- the request body is validated against `PostCreate`
+- the function runs if it passes
+- the result is converted to the response format defined by `PostResponse`
+
+This is what makes FastAPI feel much more structured than a plain Python route function.
+
+### H. In-memory data model
 
 The app stores blog posts as a Python list of dictionaries:
 
@@ -358,6 +441,18 @@ It shows how to build a detail page from a specific post ID.
 ### `templates/error.html`
 
 This is the HTML page rendered for errors like 404 or validation issues when the request is for a browser page.
+
+### `schemas.py`
+
+This file is where the Pydantic models live.
+
+It defines:
+- `PostBase` for the shared fields
+- `PostCreate` for input validation when creating a post
+- `PostUpdate` for update-style models
+- `PostResponse` for the response shape returned by the API
+
+This is the file that really shows the move from raw dicts to validated structured data.
 
 ### `static/`
 

@@ -293,7 +293,27 @@ It sends:
 - the template file name
 - a context dictionary with values to display in the page
 
-### E. Static files
+### E. Dependency injection with `Depends` and database sessions
+
+This is one of the biggest concepts added in the latest commit.
+
+```python
+@app.get("/api/posts")
+def get_posts(db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(models.Post))
+    posts = result.scalars().all()
+    return posts
+```
+
+This means:
+- FastAPI creates a database session for the request
+- the route receives that session through dependency injection
+- the session can be used to query the database
+- the session is cleaned up automatically after the request
+
+This is a very common FastAPI pattern in real apps.
+
+### F. Static files
 
 ```python
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -311,7 +331,7 @@ Example usage:
 <link rel="stylesheet" type="text/css" href="{{ url_for('static', path='css/main.css') }}">
 ```
 
-### F. Response types
+### G. Response types
 
 The project uses two main response styles:
 
@@ -332,7 +352,7 @@ HTML example:
 return templates.TemplateResponse(request, "home.html", {"posts": posts})
 ```
 
-### G. Pydantic models and validation
+### H. Pydantic models and validation
 
 This is the key idea introduced in the latest commit.
 
@@ -353,9 +373,90 @@ So the flow is basically:
 
 This is what makes FastAPI feel much more structured than a plain Python route function.
 
-### H. In-memory data model
+---
 
-The app stores blog posts as a Python list of dictionaries:
+### Adding a Database - SQLAlchemy Models and Relationships
+
+This is the commit where the app stopped being just a list of fake posts and started using a real database layer.
+
+This is a huge step because now the app is working with SQLite through SQLAlchemy, and the data is not just sitting in memory anymore.
+
+What changed:
+- `database.py` was added to set up the database connection and session factory
+- `models.py` was added with SQLAlchemy ORM models for `User` and `Post`
+- `Base.metadata.create_all(bind=engine)` was added in `main.py`
+- routes started using `Depends(get_db)` and a database session
+- queries changed from looping over a Python list to SQLAlchemy `select(...)` queries
+- `User` and `Post` got a relationship so posts belong to authors
+
+The DB setup looks like this:
+
+```python
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+class Base(DeclarativeBase):
+    pass
+
+def get_db():
+    with SessionLocal() as db:
+        yield db
+```
+
+This is the important pattern for FastAPI + SQLAlchemy:
+- create the engine
+- create a session factory
+- use `Depends(get_db)` in routes
+- close the session automatically after the request
+
+The model layer is where the real app structure starts showing up:
+
+```python
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+
+    posts: Mapped[list[Post]] = relationship(back_populates="author")
+
+
+class Post(Base):
+    __tablename__ = "posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    date_posted: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+    author: Mapped[User] = relationship(back_populates="posts")
+```
+
+This is the point where I learned that databases are not just storage; they are also about relationships. A post belongs to a user, and a user can have many posts.
+
+The route pattern also changed:
+
+```python
+@app.get("/api/posts")
+def get_posts(db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(models.Post))
+    posts = result.scalars().all()
+    return posts
+```
+
+This is the difference between fake data and persisted data. Instead of manually managing a list, FastAPI is now talking to SQLite through SQLAlchemy and returning actual database rows.
+
+---
+
+### I. In-memory data model
+
+The app started with a Python list of dictionaries as fake data:
 
 ```python
 posts: list[dict] = [
@@ -369,7 +470,9 @@ posts: list[dict] = [
 ]
 ```
 
-This is a simple mock database for learning. In real production projects, you would usually use a database like SQLite, PostgreSQL, or MongoDB.
+That was fine for learning the basics, but the app later moved to SQLite + SQLAlchemy, which is much closer to how real apps work.
+
+The important takeaway is that the basic FastAPI concepts stay the same even when the data layer changes. The route logic is similar; the storage just becomes more reliable and scalable.
 
 ---
 
@@ -441,6 +544,31 @@ It shows how to build a detail page from a specific post ID.
 ### `templates/error.html`
 
 This is the HTML page rendered for errors like 404 or validation issues when the request is for a browser page.
+
+### `database.py`
+
+This file sets up the database connection and session factory.
+
+It includes:
+- the SQLite database URL
+- the SQLAlchemy engine
+- the `SessionLocal` sessionmaker
+- the `get_db()` dependency for injecting DB sessions into routes
+
+This is the file that connects the app to the database layer.
+
+### `models.py`
+
+This file defines the SQLAlchemy ORM models.
+
+It includes:
+- `User` model
+- `Post` model
+- `relationship()` between users and posts
+- `ForeignKey` linking each post to its author
+- `image_path` property for user profile image handling
+
+This is where the app starts acting like a real database-backed project instead of a toy list app.
 
 ### `schemas.py`
 

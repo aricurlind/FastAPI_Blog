@@ -15,11 +15,10 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-
 class Base(DeclarativeBase):
     pass
 
 
-def get_db():
-    with AsyncSessionLocal() as db:
+async def get_db():
+    async with AsyncSessionLocal() as db:
         yield db
